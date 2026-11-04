@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">Chanda App</string>
+    <string name="app_subtitle">Akhada Sahyog • Private Admin Ledger</string>
+    <string name="sign_in_with_google">Sign in with Google</string>
+    <string name="nav_home">Home</string>
+    <string name="nav_donors">Donors</string>
+    <string name="nav_add_donation">Chanda</string>
+    <string name="nav_reports">Reports</string>
+    <string name="nav_settings">Settings</string>
+    <string name="payment_cash_only">CASH ONLY (नकद दान)</string>
+    <string name="thank_you_default_hi">आपके द्वारा हमारे अखाड़े को दिए गए सहयोग के लिए हृदय से धन्यवाद। आपका योगदान हमारे अखाड़े के विकास में महत्वपूर्ण भूमिका निभाएगा।</string>
+    <string name="thank_you_default_en">Thank you wholeheartedly for your generous cash contribution to our Akhada. Your support plays a vital role in training our athletes and maintaining our heritage.</string>
+</resources>

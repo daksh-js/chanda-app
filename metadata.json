@@ -1,0 +1,6 @@
+{
+  "name": "Chanda App",
+  "description": "Private Akhada cash donation, donor directory, PDF receipt, and financial reporting management system.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

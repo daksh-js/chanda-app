@@ -1,0 +1,404 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 1: Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidTimestampsOnCreate(data) {
+      return data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
+    }
+
+    function isValidTimestampsOnUpdate(data, oldData) {
+      return data.createdAt == oldData.createdAt &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
+    }
+
+    // 1. Donor Validation Helper
+    function isValidDonor(data) {
+      return data.userId is string && data.userId == request.auth.uid && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.donorCode is string && data.donorCode.size() >= 3 && data.donorCode.size() <= 32 &&
+             data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 120 &&
+             data.fatherName is string && data.fatherName.size() <= 120 &&
+             data.mobileNumber is string && data.mobileNumber.size() >= 5 && data.mobileNumber.size() <= 20 &&
+             data.whatsappNumber is string && data.whatsappNumber.size() <= 20 &&
+             data.address is string && data.address.size() <= 300 &&
+             data.village is string && data.village.size() <= 100 &&
+             data.city is string && data.city.size() <= 100 &&
+             data.district is string && data.district.size() <= 100 &&
+             data.state is string && data.state.size() <= 100 &&
+             data.pinCode is string && data.pinCode.size() <= 12 &&
+             data.addedByAdmin is string && data.addedByAdmin.size() >= 1 && data.addedByAdmin.size() <= 100 &&
+             data.lifetimeDonation is int && data.lifetimeDonation >= 0 && data.lifetimeDonation <= 1000000000 &&
+             data.donationCount is int && data.donationCount >= 0 && data.donationCount <= 1000000 &&
+             data.isFavorite is bool &&
+             data.consentGiven is bool &&
+             data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
+             data.updatedBy is string && data.updatedBy == request.auth.uid && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
+             (!('photoUri' in data) || data.photoUri == null || (data.photoUri is string && data.photoUri.size() <= 500000)) &&
+             (!('alternateMobile' in data) || data.alternateMobile == null || (data.alternateMobile is string && data.alternateMobile.size() <= 20)) &&
+             (!('occupation' in data) || data.occupation == null || (data.occupation is string && data.occupation.size() <= 100)) &&
+             (!('birthday' in data) || data.birthday == null || (data.birthday is string && data.birthday.size() <= 30)) &&
+             (!('notes' in data) || data.notes == null || (data.notes is string && data.notes.size() <= 500));
+    }
+
+    match /donors/{donorId} {
+      allow get: if isSignedIn() && isValidId(donorId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidId(donorId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'donorCode', 'fullName', 'fatherName', 'mobileNumber',
+                         'whatsappNumber', 'address', 'village', 'city', 'district',
+                         'state', 'pinCode', 'addedByAdmin', 'lifetimeDonation',
+                         'donationCount', 'isFavorite', 'consentGiven', 'createdBy',
+                         'updatedBy', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'donorCode', 'fullName', 'fatherName', 'mobileNumber',
+                         'whatsappNumber', 'alternateMobile', 'address', 'village', 'city',
+                         'district', 'state', 'pinCode', 'occupation', 'birthday', 'notes',
+                         'photoUri', 'addedByAdmin', 'lifetimeDonation', 'donationCount',
+                         'isFavorite', 'consentGiven', 'createdBy', 'updatedBy',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().createdBy == request.auth.uid &&
+                       isValidTimestampsOnCreate(incoming()) &&
+                       isValidDonor(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(donorId) &&
+                       isValidDonor(incoming()) &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().donorCode == existing().donorCode &&
+                       incoming().createdBy == existing().createdBy &&
+                       isValidTimestampsOnUpdate(incoming(), existing()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'fullName', 'fatherName', 'mobileNumber', 'whatsappNumber',
+                         'alternateMobile', 'address', 'village', 'city', 'district',
+                         'state', 'pinCode', 'occupation', 'birthday', 'notes',
+                         'photoUri', 'lifetimeDonation', 'donationCount', 'isFavorite',
+                         'consentGiven', 'updatedBy', 'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && isValidId(donorId) && existing().userId == request.auth.uid;
+    }
+
+    // 2. Donation Validation Helper (Strictly CASH only)
+    function isValidDonation(data) {
+      return data.userId is string && data.userId == request.auth.uid && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.donorId is string && data.donorId.size() >= 1 && data.donorId.size() <= 128 &&
+             data.donorCode is string && data.donorCode.size() >= 3 && data.donorCode.size() <= 32 &&
+             data.donorName is string && data.donorName.size() >= 1 && data.donorName.size() <= 120 &&
+             data.donorMobile is string && data.donorMobile.size() >= 5 && data.donorMobile.size() <= 20 &&
+             data.amount is int && data.amount > 0 && data.amount <= 100000000 &&
+             data.amountInWords is string && data.amountInWords.size() >= 1 && data.amountInWords.size() <= 300 &&
+             data.donationDate is string && data.donationDate.size() >= 8 && data.donationDate.size() <= 30 &&
+             data.purpose is string && data.purpose.size() >= 1 && data.purpose.size() <= 120 &&
+             data.paymentMethod is string && data.paymentMethod == 'CASH' &&
+             data.receiptNumber is string && data.receiptNumber.size() >= 3 && data.receiptNumber.size() <= 40 &&
+             data.receivedByAdmin is string && data.receivedByAdmin.size() >= 1 && data.receivedByAdmin.size() <= 100 &&
+             data.status is string && data.status in ['CONFIRMED', 'CORRECTED', 'REVERSED'] &&
+             data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
+             data.updatedBy is string && data.updatedBy == request.auth.uid && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
+             (!('notes' in data) || data.notes == null || (data.notes is string && data.notes.size() <= 500)) &&
+             (!('correctionNote' in data) || data.correctionNote == null || (data.correctionNote is string && data.correctionNote.size() <= 500));
+    }
+
+    match /donations/{donationId} {
+      allow get: if isSignedIn() && isValidId(donationId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidId(donationId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'donorId', 'donorCode', 'donorName', 'donorMobile',
+                         'amount', 'amountInWords', 'donationDate', 'purpose',
+                         'paymentMethod', 'receiptNumber', 'receivedByAdmin', 'status',
+                         'createdBy', 'updatedBy', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'donorId', 'donorCode', 'donorName', 'donorMobile',
+                         'amount', 'amountInWords', 'donationDate', 'purpose',
+                         'paymentMethod', 'receiptNumber', 'receivedByAdmin', 'notes',
+                         'status', 'correctionNote', 'createdBy', 'updatedBy',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().createdBy == request.auth.uid &&
+                       isValidTimestampsOnCreate(incoming()) &&
+                       isValidDonation(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(donationId) &&
+                       isValidDonation(incoming()) &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().donorId == existing().donorId &&
+                       incoming().receiptNumber == existing().receiptNumber &&
+                       incoming().paymentMethod == 'CASH' &&
+                       incoming().createdBy == existing().createdBy &&
+                       isValidTimestampsOnUpdate(incoming(), existing()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'amount', 'amountInWords', 'purpose', 'notes',
+                         'status', 'correctionNote', 'updatedBy', 'updatedAt'
+                       ]);
+
+      // Financial records must never be silently deleted; reversals are recorded via status = REVERSED
+      allow delete: if false;
+    }
+
+    // 3. Receipt Validation Helper
+    function isValidReceipt(data) {
+      return data.userId is string && data.userId == request.auth.uid && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.receiptNumber is string && data.receiptNumber.size() >= 3 && data.receiptNumber.size() <= 40 &&
+             data.donationId is string && data.donationId.size() >= 1 && data.donationId.size() <= 128 &&
+             data.donorId is string && data.donorId.size() >= 1 && data.donorId.size() <= 128 &&
+             data.donorCode is string && data.donorCode.size() >= 3 && data.donorCode.size() <= 32 &&
+             data.donorName is string && data.donorName.size() >= 1 && data.donorName.size() <= 120 &&
+             data.donorMobile is string && data.donorMobile.size() >= 5 && data.donorMobile.size() <= 20 &&
+             data.amount is int && data.amount > 0 && data.amount <= 100000000 &&
+             data.amountInWords is string && data.amountInWords.size() >= 1 && data.amountInWords.size() <= 300 &&
+             data.donationDate is string && data.donationDate.size() >= 8 && data.donationDate.size() <= 30 &&
+             data.paymentMethod is string && data.paymentMethod == 'CASH' &&
+             data.receivedByAdmin is string && data.receivedByAdmin.size() >= 1 && data.receivedByAdmin.size() <= 100 &&
+             data.akhadaName is string && data.akhadaName.size() >= 1 && data.akhadaName.size() <= 150 &&
+             data.akhadaAddress is string && data.akhadaAddress.size() >= 1 && data.akhadaAddress.size() <= 300 &&
+             data.qrPayload is string && data.qrPayload.size() >= 5 && data.qrPayload.size() <= 600 &&
+             data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
+             data.updatedBy is string && data.updatedBy == request.auth.uid && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
+             (!('purpose' in data) || data.purpose == null || (data.purpose is string && data.purpose.size() <= 120)) &&
+             (!('thankYouMessage' in data) || data.thankYouMessage == null || (data.thankYouMessage is string && data.thankYouMessage.size() <= 500));
+    }
+
+    match /receipts/{receiptId} {
+      allow get: if isSignedIn() && isValidId(receiptId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidId(receiptId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'receiptNumber', 'donationId', 'donorId', 'donorCode',
+                         'donorName', 'donorMobile', 'amount', 'amountInWords',
+                         'donationDate', 'paymentMethod', 'receivedByAdmin',
+                         'akhadaName', 'akhadaAddress', 'qrPayload',
+                         'createdBy', 'updatedBy', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'receiptNumber', 'donationId', 'donorId', 'donorCode',
+                         'donorName', 'donorMobile', 'amount', 'amountInWords',
+                         'donationDate', 'purpose', 'paymentMethod', 'receivedByAdmin',
+                         'akhadaName', 'akhadaAddress', 'thankYouMessage', 'qrPayload',
+                         'createdBy', 'updatedBy', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().createdBy == request.auth.uid &&
+                       isValidTimestampsOnCreate(incoming()) &&
+                       isValidReceipt(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(receiptId) &&
+                       isValidReceipt(incoming()) &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().receiptNumber == existing().receiptNumber &&
+                       incoming().donationId == existing().donationId &&
+                       incoming().createdBy == existing().createdBy &&
+                       isValidTimestampsOnUpdate(incoming(), existing()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'amount', 'amountInWords', 'purpose', 'thankYouMessage',
+                         'qrPayload', 'updatedBy', 'updatedAt'
+                       ]);
+
+      allow delete: if false;
+    }
+
+    // 4. AuthorizedDevice Validation Helper
+    function isValidAuthorizedDevice(data) {
+      return data.userId is string && data.userId == request.auth.uid && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.installationId is string && data.installationId.size() >= 4 && data.installationId.size() <= 128 &&
+             data.deviceName is string && data.deviceName.size() >= 1 && data.deviceName.size() <= 120 &&
+             data.adminName is string && data.adminName.size() >= 1 && data.adminName.size() <= 100 &&
+             data.role is string && data.role in ['OWNER_ADMIN', 'STAFF_ADMIN'] &&
+             data.status is string && data.status in ['APPROVED', 'PENDING', 'REVOKED'] &&
+             data.canAddDonor is bool &&
+             data.canEditDonor is bool &&
+             data.canDeleteDonor is bool &&
+             data.canRecordDonation is bool &&
+             data.canViewReports is bool &&
+             data.canExportData is bool &&
+             data.lastActiveAt is string && data.lastActiveAt.size() >= 1 && data.lastActiveAt.size() <= 50 &&
+             data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
+             data.updatedBy is string && data.updatedBy == request.auth.uid && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128;
+    }
+
+    match /authorized_devices/{deviceId} {
+      allow get: if isSignedIn() && isValidId(deviceId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidId(deviceId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'installationId', 'deviceName', 'adminName',
+                         'role', 'status', 'canAddDonor', 'canEditDonor',
+                         'canDeleteDonor', 'canRecordDonation', 'canViewReports',
+                         'canExportData', 'lastActiveAt', 'createdBy', 'updatedBy',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'installationId', 'deviceName', 'adminName',
+                         'role', 'status', 'canAddDonor', 'canEditDonor',
+                         'canDeleteDonor', 'canRecordDonation', 'canViewReports',
+                         'canExportData', 'lastActiveAt', 'createdBy', 'updatedBy',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().createdBy == request.auth.uid &&
+                       isValidTimestampsOnCreate(incoming()) &&
+                       isValidAuthorizedDevice(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(deviceId) &&
+                       isValidAuthorizedDevice(incoming()) &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().installationId == existing().installationId &&
+                       incoming().createdBy == existing().createdBy &&
+                       isValidTimestampsOnUpdate(incoming(), existing()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'deviceName', 'adminName', 'role', 'status',
+                         'canAddDonor', 'canEditDonor', 'canDeleteDonor',
+                         'canRecordDonation', 'canViewReports', 'canExportData',
+                         'lastActiveAt', 'updatedBy', 'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && isValidId(deviceId) && existing().userId == request.auth.uid;
+    }
+
+    // 5. ActivityLog Validation Helper (Append-Only Audit Trail)
+    function isValidActivityLog(data) {
+      return data.userId is string && data.userId == request.auth.uid && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.actionType is string && data.actionType.size() >= 2 && data.actionType.size() <= 60 &&
+             data.description is string && data.description.size() >= 2 && data.description.size() <= 500 &&
+             data.adminName is string && data.adminName.size() >= 1 && data.adminName.size() <= 100 &&
+             data.deviceId is string && data.deviceId.size() >= 1 && data.deviceId.size() <= 128 &&
+             data.entityType is string && data.entityType in ['DONOR', 'DONATION', 'RECEIPT', 'DEVICE', 'SETTINGS'] &&
+             data.entityId is string && data.entityId.size() >= 1 && data.entityId.size() <= 128 &&
+             data.createdBy is string && data.createdBy == request.auth.uid && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
+             data.updatedBy is string && data.updatedBy == request.auth.uid && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128;
+    }
+
+    match /activity_logs/{logId} {
+      allow get: if isSignedIn() && isValidId(logId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidId(logId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'actionType', 'description', 'adminName',
+                         'deviceId', 'entityType', 'entityId', 'createdBy',
+                         'updatedBy', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'actionType', 'description', 'adminName',
+                         'deviceId', 'entityType', 'entityId', 'createdBy',
+                         'updatedBy', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidTimestampsOnCreate(incoming()) &&
+                       isValidActivityLog(incoming());
+
+      allow update, delete: if false;
+    }
+
+    // 6. AppSettings Validation Helper
+    function isValidAppSettings(data) {
+      return data.userId is string && data.userId == request.auth.uid && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.akhadaName is string && data.akhadaName.size() >= 2 && data.akhadaName.size() <= 150 &&
+             data.akhadaRegNumber is string && data.akhadaRegNumber.size() >= 2 && data.akhadaRegNumber.size() <= 80 &&
+             data.akhadaAddress is string && data.akhadaAddress.size() >= 2 && data.akhadaAddress.size() <= 300 &&
+             data.ownerAdminName is string && data.ownerAdminName.size() >= 1 && data.ownerAdminName.size() <= 100 &&
+             data.ownerAdminPhone is string && data.ownerAdminPhone.size() >= 5 && data.ownerAdminPhone.size() <= 20 &&
+             data.vaultAllocationId is string && data.vaultAllocationId.size() >= 2 && data.vaultAllocationId.size() <= 50 &&
+             data.activeSeason is string && data.activeSeason.size() >= 2 && data.activeSeason.size() <= 50 &&
+             data.language is string && data.language in ['EN', 'HI', 'BILINGUAL'] &&
+             data.darkMode is bool &&
+             data.maxAuthorizedDevices is int && data.maxAuthorizedDevices >= 1 && data.maxAuthorizedDevices <= 6 &&
+             data.thankYouTemplateHi is string && data.thankYouTemplateHi.size() >= 5 && data.thankYouTemplateHi.size() <= 600 &&
+             data.thankYouTemplateEn is string && data.thankYouTemplateEn.size() >= 5 && data.thankYouTemplateEn.size() <= 600 &&
+             data.reminderTemplateHi is string && data.reminderTemplateHi.size() >= 5 && data.reminderTemplateHi.size() <= 600 &&
+             data.reminderTemplateEn is string && data.reminderTemplateEn.size() >= 5 && data.reminderTemplateEn.size() <= 600 &&
+             data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
+             data.updatedBy is string && data.updatedBy == request.auth.uid && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128;
+    }
+
+    match /app_settings/{settingId} {
+      allow get: if isSignedIn() && isValidId(settingId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidId(settingId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'akhadaName', 'akhadaRegNumber', 'akhadaAddress',
+                         'ownerAdminName', 'ownerAdminPhone', 'vaultAllocationId',
+                         'activeSeason', 'language', 'darkMode', 'maxAuthorizedDevices',
+                         'thankYouTemplateHi', 'thankYouTemplateEn',
+                         'reminderTemplateHi', 'reminderTemplateEn',
+                         'createdBy', 'updatedBy', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'akhadaName', 'akhadaRegNumber', 'akhadaAddress',
+                         'ownerAdminName', 'ownerAdminPhone', 'vaultAllocationId',
+                         'activeSeason', 'language', 'darkMode', 'maxAuthorizedDevices',
+                         'thankYouTemplateHi', 'thankYouTemplateEn',
+                         'reminderTemplateHi', 'reminderTemplateEn',
+                         'createdBy', 'updatedBy', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().createdBy == request.auth.uid &&
+                       isValidTimestampsOnCreate(incoming()) &&
+                       isValidAppSettings(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(settingId) &&
+                       isValidAppSettings(incoming()) &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdBy == existing().createdBy &&
+                       isValidTimestampsOnUpdate(incoming(), existing()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'akhadaName', 'akhadaRegNumber', 'akhadaAddress',
+                         'ownerAdminName', 'ownerAdminPhone', 'vaultAllocationId',
+                         'activeSeason', 'language', 'darkMode', 'maxAuthorizedDevices',
+                         'thankYouTemplateHi', 'thankYouTemplateEn',
+                         'reminderTemplateHi', 'reminderTemplateEn',
+                         'updatedBy', 'updatedAt'
+                       ]);
+
+      allow delete: if false;
+    }
+  }
+}
