@@ -112,6 +112,11 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
+private fun resolveGoogleWebClientId(context: Context): String? {
+    val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
+    return if (resId != 0) context.getString(resId) else null
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -224,7 +229,7 @@ fun AdminDeviceAuthorizationGate(
                     )
 
                     Text(
-                        text = "Strict Private Device Authorization\nNo public registration • Cash-only Akhada ledger.\nVerify your administrator Google identity to enroll this device ($deviceModel).",
+                        text = "Strict Private Device Authorization\nNo public registration • Cash-only Akhada ledger.\nVerify your administrator Google identity to enroll this device ($deviceModel)",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
@@ -349,9 +354,9 @@ fun attemptAutoSignIn(
         onAuthSuccess()
         return
     }
-    val clientId = try {
-        context.getString(R.string.default_web_client_id)
-    } catch (e: Exception) {
+
+    val clientId = resolveGoogleWebClientId(context)
+    if (clientId.isNullOrBlank()) {
         onUnauthenticated()
         return
     }
@@ -390,9 +395,8 @@ fun onGoogleSignInClicked(
     scope: CoroutineScope,
     onAuthCancelled: () -> Unit = {}
 ) {
-    val clientId = try {
-        context.getString(R.string.default_web_client_id)
-    } catch (e: Exception) {
+    val clientId = resolveGoogleWebClientId(context)
+    if (clientId.isNullOrBlank()) {
         onAuthError("Google Sign-In configuration missing: default_web_client_id not found")
         return
     }
